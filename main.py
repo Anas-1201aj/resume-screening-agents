@@ -168,6 +168,9 @@ async def main():
     # 1. Register subscribers FIRST so nothing is missed
     await run_resume_agent(nc)
     await run_jd_agent(nc)
+    
+    from notification_agent import run_notification_agent
+    await run_notification_agent(nc)
 
     # 2. Queue bridges the blocking watcher thread -> async world
     queue = asyncio.Queue()

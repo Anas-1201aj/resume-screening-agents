@@ -102,28 +102,39 @@ async def process_job_matching(job_id: str, nc=None):
         
         # Search in Qdrant
         logger.info("🔍 Searching Qdrant for matching resumes...")
-        search_result = qdrant.query_points(
+        search_result = qdrant.search(
             collection_name=QDRANT_COLLECTION,
-            query=vector,
+            query_vector=vector,
             limit=10000,
             with_payload=True
         )
         
         # Extract points from search result
         results = []
-        if hasattr(search_result, 'points'):
+        # Support both high-level API (list) and low-level/older API (object with .points)
+        if isinstance(search_result, list):
+            for point in search_result:
+                results.append({
+                    "score": point.score,
+                    "payload": point.payload
+                })
+        elif hasattr(search_result, 'points'):
             for point in search_result.points:
                 results.append({
                     "score": point.score,
                     "payload": point.payload
                 })
         
-        logger.info(f"📊 Found {len(results)} total results")
+        logger.info(f"📊 Extracted {len(results)} results from Qdrant response")
         
         # Filter results for this specific job
         filtered_results = []
         for r in results:
-            if r["payload"] and r["payload"].get("job_id") == job_id:
+            # Ensure safe comparison of job_id (string to string)
+            target_job_id = str(job_id)
+            point_job_id = str(r["payload"].get("job_id", ""))
+            
+            if point_job_id == target_job_id:
                 filtered_results.append(r)
         
         results = filtered_results
@@ -172,6 +183,16 @@ async def process_job_matching(job_id: str, nc=None):
                     }}
                 )
                 logger.info(f"   {app_id}: {score:.4f} - {status}")
+
+                # Trigger notification if selected
+                if status == "selected" and nc and nc.is_connected:
+                    msg = {
+                        "application_id": app_id,
+                        "job_id": job_id,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    await nc.publish("resume.selected", json.dumps(msg).encode())
+                    logger.info(f"      📤 Triggered notification for {app_id}")
             except Exception as e:
                 logger.error(f"Error updating application {app_id}: {e}")
         
